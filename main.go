@@ -54,9 +54,8 @@ func main() {
 	total := decodedMp3.Length()
 	player.Play()
 	for player.IsPlaying() {
-		current := float64(c.n) / float64(total) * 100
-		fmt.Print("\033[H\033[2J")
-		fmt.Printf("[%s]%d%%\n", strings.Repeat("#", int(current))+strings.Repeat(" ", 100-int(current)), int(current))
+		percent := float64(c.n) / float64(total) * 100
+		fmt.Printf("\r\r[%s] %.2f%% ", strings.Repeat("#", int(percent))+strings.Repeat(" ", 100-int(percent)), percent)
 		time.Sleep(time.Second)
 	}
 }
