@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ebitengine/oto/v3"
@@ -54,16 +56,28 @@ func main() {
 	c := countWraper{r: decodedMp3}
 	player := otoCtx.NewPlayer(&c)
 
-	width, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		panic("Cannot get the terminal width " + err.Error())
-	}
-	width -= 10
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGWINCH)
+	width := 100
 	total := decodedMp3.Length()
+
+	sigCh <- nil
 	player.Play()
-	for player.IsPlaying() {
-		percent := float64(c.n) / float64(total) * float64(width)
-		fmt.Printf("\r\r[%s] %.2f%% ", strings.Repeat("#", int(percent))+strings.Repeat(" ", width-int(percent)), percent)
-		time.Sleep(time.Second)
+	for {
+		select {
+		case <-sigCh:
+			width, _, err = term.GetSize(int(os.Stdout.Fd()))
+			if err != nil {
+				panic("Cannot get the terminal width " + err.Error())
+			}
+			width -= 10
+		default:
+			if !player.IsPlaying() {
+				return
+			}
+			percent := float64(c.n) / float64(total) * float64(width)
+			fmt.Printf("\r\r[%s] %.2f%% ", strings.Repeat("#", int(percent))+strings.Repeat(" ", width-int(percent)), percent)
+			time.Sleep(time.Second)
+		}
 	}
 }
