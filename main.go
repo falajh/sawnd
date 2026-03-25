@@ -9,6 +9,7 @@ import (
 
 	"github.com/ebitengine/oto/v3"
 	"github.com/hajimehoshi/go-mp3"
+	"golang.org/x/term"
 )
 
 type countWraper struct {
@@ -38,6 +39,7 @@ func main() {
 	if err != nil {
 		panic("mp3.NewDecoder failed: " + err.Error())
 	}
+
 	opt := oto.NewContextOptions{
 		Format:       oto.FormatSignedInt16LE,
 		ChannelCount: 2,
@@ -45,17 +47,23 @@ func main() {
 	}
 	otoCtx, ready, err := oto.NewContext(&opt)
 	if err != nil {
-		panic("oto.NewContext" + err.Error())
+		panic("oto.NewContext " + err.Error())
 	}
+
 	<-ready
 	c := countWraper{r: decodedMp3}
 	player := otoCtx.NewPlayer(&c)
 
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		panic("Cannot get the terminal width " + err.Error())
+	}
+	width -= 10
 	total := decodedMp3.Length()
 	player.Play()
 	for player.IsPlaying() {
-		percent := float64(c.n) / float64(total) * 100
-		fmt.Printf("\r\r[%s] %.2f%% ", strings.Repeat("#", int(percent))+strings.Repeat(" ", 100-int(percent)), percent)
+		percent := float64(c.n) / float64(total) * float64(width)
+		fmt.Printf("\r\r[%s] %.2f%% ", strings.Repeat("#", int(percent))+strings.Repeat(" ", width-int(percent)), percent)
 		time.Sleep(time.Second)
 	}
 }
