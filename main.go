@@ -26,7 +26,6 @@ func (c *countWraper) Read(p []byte) (n int, err error) {
 }
 
 func main() {
-
 	if len(os.Args) < 2 {
 		println("sawnd <file.mp3>")
 		os.Exit(1)
@@ -56,11 +55,31 @@ func main() {
 	c := countWraper{r: decodedMp3}
 	player := otoCtx.NewPlayer(&c)
 
+	// Switch terminal to raw mode so we can read keypresses instantly
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		panic("term.MakeRaw failed: " + err.Error())
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
 	width := 100
 	total := decodedMp3.Length()
 
+	keyCh := make(chan byte)
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if err != nil || n == 0 {
+				return
+			}
+			keyCh <- buf[0]
+		}
+	}()
+
+	paused := false
 	sigCh <- nil
 	player.Play()
 	for {
@@ -71,13 +90,28 @@ func main() {
 				panic("Cannot get the terminal width " + err.Error())
 			}
 			width -= 10
+
+		case key := <-keyCh:
+			switch key {
+			case ' ':
+				if paused {
+					player.Play()
+					paused = false
+				} else {
+					player.Pause()
+					paused = true
+				}
+			case 'q', 'Q', 3: // 3 = Ctrl+C
+				return
+			}
+
 		default:
-			if !player.IsPlaying() {
+			if !player.IsPlaying() && !paused {
 				return
 			}
 			percent := float64(c.n) / float64(total) * float64(width)
 			fmt.Printf("\r\r[%s] %.2f%% ", strings.Repeat("#", int(percent))+strings.Repeat(" ", width-int(percent)), percent)
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Microsecond)
 		}
 	}
 }
