@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -14,31 +13,21 @@ import (
 	"golang.org/x/term"
 )
 
-type countWraper struct {
-	r io.Reader
-	n int64
-}
-
-func (c *countWraper) Read(p []byte) (n int, err error) {
-	n, err = c.r.Read(p)
-	c.n += int64(n)
-	return n, err
-}
-
 func main() {
 	if len(os.Args) < 2 {
 		println("sawnd <file.mp3>")
 		os.Exit(1)
 	}
 
-	file, err := os.Open(os.Args[1])
+	fd, err := os.Open(os.Args[1])
 	if err != nil {
 		panic("opening my-file.mp3 failed: " + err.Error())
 	}
+	defer fd.Close()
 
-	decodedMp3, err := mp3.NewDecoder(file)
+	mr, err := newMp3Reader(fd)
 	if err != nil {
-		panic("mp3.NewDecoder failed: " + err.Error())
+		panic("cannot create mp3Reader: " + err.Error())
 	}
 
 	opt := oto.NewContextOptions{
@@ -48,12 +37,11 @@ func main() {
 	}
 	otoCtx, ready, err := oto.NewContext(&opt)
 	if err != nil {
-		panic("oto.NewContext " + err.Error())
+		panic("cannot create oto.NewContext: " + err.Error())
 	}
 
 	<-ready
-	c := countWraper{r: decodedMp3}
-	player := otoCtx.NewPlayer(&c)
+	player := otoCtx.NewPlayer(mr)
 
 	// Switch terminal to raw mode so we can read keypresses instantly
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -64,8 +52,8 @@ func main() {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
-	width := 100
-	total := decodedMp3.Length()
+	var width int
+	total := mr.Length
 
 	keyCh := make(chan byte)
 	go func() {
@@ -89,7 +77,7 @@ func main() {
 			if err != nil {
 				panic("Cannot get the terminal width " + err.Error())
 			}
-			width -= 10
+			width -= 11
 
 		case key := <-keyCh:
 			switch key {
@@ -109,9 +97,35 @@ func main() {
 			if !player.IsPlaying() && !paused {
 				return
 			}
-			percent := float64(c.n) / float64(total) * float64(width)
-			fmt.Printf("\r\r[%s] %.2f%% ", strings.Repeat("#", int(percent))+strings.Repeat(" ", width-int(percent)), percent)
+			percent := float64(mr.count) / float64(total)
+			done := int(percent * float64(width))
+			fill := width - int(done)
+			fmt.Printf("\r\r[%s%s] %.2f%% ", strings.Repeat("#", done), strings.Repeat(" ", fill), percent*100)
 			time.Sleep(100 * time.Microsecond)
 		}
 	}
+}
+
+func newMp3Reader(fd *os.File) (*mp3Reader, error) {
+	decodedMp3, err := mp3.NewDecoder(fd)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mp3Reader{
+		decoder: decodedMp3,
+		Length:  decodedMp3.Length(),
+	}, nil
+}
+
+type mp3Reader struct {
+	decoder *mp3.Decoder
+	count   int64
+	Length  int64
+}
+
+func (mr *mp3Reader) Read(p []byte) (n int, err error) {
+	n, err = mr.decoder.Read(p)
+	mr.count += int64(n)
+	return n, err
 }
