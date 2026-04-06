@@ -77,7 +77,7 @@ func main() {
 			if err != nil {
 				panic("Cannot get the terminal width " + err.Error())
 			}
-			width -= 11
+			width -= 14
 
 		case key := <-keyCh:
 			switch key {
@@ -91,6 +91,16 @@ func main() {
 				}
 			case 'q', 'Q', 3: // 3 = Ctrl+C
 				return
+			case 65:
+				if player.Volume() >= 1 {
+					continue
+				}
+				player.SetVolume(player.Volume() + 0.1)
+			case 66:
+				if player.Volume() <= 0 {
+					continue
+				}
+				player.SetVolume(player.Volume() - 0.1)
 			}
 
 		default:
@@ -100,7 +110,7 @@ func main() {
 			percent := float64(mr.count) / float64(total)
 			done := int(percent * float64(width))
 			fill := width - int(done)
-			fmt.Printf("\r\r[%s%s] %.2f%% ", strings.Repeat("#", done), strings.Repeat(" ", fill), percent*100)
+			fmt.Printf("\r\r[%02d][%s%s] %.2f%% ", int(10*player.Volume()), strings.Repeat("#", done), strings.Repeat(" ", fill), percent*100)
 			time.Sleep(100 * time.Microsecond)
 		}
 	}
