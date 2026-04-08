@@ -70,6 +70,7 @@ func main() {
 	paused := false
 	sigCh <- nil
 	player.Play()
+Main:
 	for {
 		select {
 		case <-sigCh:
@@ -105,12 +106,12 @@ func main() {
 
 		default:
 			if !player.IsPlaying() && !paused {
-				return
+				break Main
 			}
 			percent := float64(mr.count) / float64(total)
 			done := int(percent * float64(width))
 			fill := width - int(done)
-			fmt.Printf("\r\r[%02d][%s%s] %.2f%% ", int(10*player.Volume()), strings.Repeat("#", done), strings.Repeat(" ", fill), percent*100)
+			fmt.Printf("\r\r(%02d)[%s%s] %.1f%% ", int(10*player.Volume()), strings.Repeat("#", done), strings.Repeat(" ", fill), percent*100)
 			time.Sleep(100 * time.Microsecond)
 		}
 	}
