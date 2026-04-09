@@ -20,10 +20,11 @@ type player struct {
 	streamer   beep.StreamSeeker
 	ctrl       *beep.Ctrl
 	volume     *effects.Volume
+	finished   bool
 }
 
-func newPlayer(sampleRate beep.SampleRate, streamer beep.StreamSeeker) *player {
-	ctrl := &beep.Ctrl{Streamer: beep.Loop(-1, streamer)}
+func newPlayer(sampleRate beep.SampleRate, streamer beep.StreamSeeker, loop int) *player {
+	ctrl := &beep.Ctrl{Streamer: beep.Loop(loop, streamer)}
 	resampler := beep.ResampleRatio(4, 1, ctrl)
 	volume := &effects.Volume{Streamer: resampler, Base: 2}
 	return &player{
@@ -35,7 +36,7 @@ func newPlayer(sampleRate beep.SampleRate, streamer beep.StreamSeeker) *player {
 }
 
 func (p *player) play() {
-	speaker.Play(p.volume)
+	speaker.Play(beep.Seq(p.volume, beep.Callback(func() { p.finished = true })))
 }
 
 type display struct {
@@ -103,7 +104,7 @@ func (d *display) update(p *player) {
 
 func main() {
 	if len(os.Args) < 2 {
-		println("sawnd <file.mp3>")
+		println("sawnd <file.mp3> [ -l | --loop ]")
 		os.Exit(1)
 	}
 
@@ -112,6 +113,10 @@ func main() {
 		panic("os.Open: " + err.Error())
 	}
 	defer fd.Close()
+	loop := 1
+	if len(os.Args) >= 3 && (os.Args[2] == "-l" || os.Args[2] == "--loop") {
+		loop = -1
+	}
 
 	streamer, format, err := mp3.Decode(fd)
 	if err != nil {
@@ -121,7 +126,7 @@ func main() {
 
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
 
-	p := newPlayer(format.SampleRate, streamer)
+	p := newPlayer(format.SampleRate, streamer, loop)
 
 	d := display{}
 	keyCh := d.init()
@@ -173,6 +178,11 @@ func main() {
 			if p.ctrl.Paused {
 				continue
 			}
+
+			if p.finished {
+				return
+			}
+
 			d.update(p)
 		}
 	}
