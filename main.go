@@ -8,10 +8,98 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ebitengine/oto/v3"
-	"github.com/hajimehoshi/go-mp3"
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/effects"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
 	"golang.org/x/term"
 )
+
+type player struct {
+	sampleRate beep.SampleRate
+	streamer   beep.StreamSeeker
+	ctrl       *beep.Ctrl
+	volume     *effects.Volume
+}
+
+func newPlayer(sampleRate beep.SampleRate, streamer beep.StreamSeeker) *player {
+	ctrl := &beep.Ctrl{Streamer: beep.Loop(-1, streamer)}
+	resampler := beep.ResampleRatio(4, 1, ctrl)
+	volume := &effects.Volume{Streamer: resampler, Base: 2}
+	return &player{
+		sampleRate: sampleRate,
+		streamer:   streamer,
+		ctrl:       ctrl,
+		volume:     volume,
+	}
+}
+
+func (p *player) play() {
+	speaker.Play(p.volume)
+}
+
+type display struct {
+	width    int
+	oldState *term.State
+}
+
+func (d *display) init() (keyCh chan byte) {
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		panic("term.MakeRaw failed: " + err.Error())
+	}
+	d.oldState = oldState
+
+	keyCh = make(chan byte)
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if err != nil || n == 0 {
+				return
+			}
+			keyCh <- buf[0]
+		}
+	}()
+
+	go func() {
+		widthCh := make(chan os.Signal, 1)
+		signal.Notify(widthCh, syscall.SIGWINCH)
+
+		widthCh <- nil
+		for range widthCh {
+			width, _, err := term.GetSize(int(os.Stdout.Fd()))
+			if err != nil {
+				panic("Cannot get the terminal width " + err.Error())
+			}
+			width -= 20
+			d.width = width
+		}
+	}()
+
+	return keyCh
+}
+
+func (d *display) reset() {
+	term.Restore(int(os.Stdin.Fd()), d.oldState)
+
+}
+
+func (d *display) update(p *player) {
+	speaker.Lock()
+	position := p.sampleRate.D(p.streamer.Position())
+	length := p.sampleRate.D(p.streamer.Len())
+	pres := position.Seconds() / length.Seconds()
+	done := int(pres * float64(d.width))
+	hashtag := strings.Repeat("#", done)
+	space := strings.Repeat(" ", d.width-done)
+	volume := p.volume.Volume
+	// speed := ap.resampler.Ratio()
+	speaker.Unlock()
+	positionFormat := fmt.Sprintf("%02d:%02d", int(position.Minutes())%60, int(position.Seconds())%60)
+	totalFormat := fmt.Sprintf("%02d:%02d", int(length.Minutes())%60, int(length.Seconds())%60)
+	fmt.Printf("\r\r(%02d)[%s%s] %s/%s ", int(10*volume), hashtag, space, positionFormat, totalFormat)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -25,118 +113,69 @@ func main() {
 	}
 	defer fd.Close()
 
-	mr, err := newMp3Reader(fd)
+	streamer, format, err := mp3.Decode(fd)
+	// d, err := newMp3Decoder(fd)
 	if err != nil {
 		panic("cannot create mp3Reader: " + err.Error())
 	}
+	defer streamer.Close()
 
-	opt := oto.NewContextOptions{
-		Format:       oto.FormatSignedInt16LE,
-		ChannelCount: 2,
-		SampleRate:   44100,
-	}
-	otoCtx, ready, err := oto.NewContext(&opt)
-	if err != nil {
-		panic("cannot create oto.NewContext: " + err.Error())
-	}
+	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
 
-	<-ready
-	player := otoCtx.NewPlayer(mr)
+	p := newPlayer(format.SampleRate, streamer)
 
 	// Switch terminal to raw mode so we can read keypresses instantly
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		panic("term.MakeRaw failed: " + err.Error())
-	}
-	defer term.Restore(int(os.Stdin.Fd()), oldState)
+	d := display{}
+	keyCh := d.init()
+	defer d.reset()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGWINCH)
-	var width int
-	total := mr.Length
-
-	keyCh := make(chan byte)
-	go func() {
-		buf := make([]byte, 1)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if err != nil || n == 0 {
-				return
-			}
-			keyCh <- buf[0]
-		}
-	}()
-
-	paused := false
-	sigCh <- nil
-	player.Play()
-Main:
+	round := time.Tick(100 * time.Microsecond)
+	p.play()
+	d.update(p)
 	for {
 		select {
-		case <-sigCh:
-			width, _, err = term.GetSize(int(os.Stdout.Fd()))
-			if err != nil {
-				panic("Cannot get the terminal width " + err.Error())
-			}
-			width -= 14
-
 		case key := <-keyCh:
 			switch key {
 			case ' ':
-				if paused {
-					player.Play()
-					paused = false
-				} else {
-					player.Pause()
-					paused = true
-				}
-			case 'q', 'Q', 3: // 3 = Ctrl+C
+				speaker.Lock()
+				p.ctrl.Paused = !p.ctrl.Paused
+				speaker.Unlock()
+			case 'q', 3: // 3 = Ctrl+C
 				return
-			case 65:
-				if player.Volume() >= 1 {
-					continue
+			case 'j', 'k':
+				speaker.Lock()
+				v := 0.1
+				if key == 'j' {
+					v = -0.1
 				}
-				player.SetVolume(player.Volume() + 0.1)
-			case 66:
-				if player.Volume() <= 0 {
-					continue
+				p.volume.Volume += v
+				speaker.Unlock()
+			case 'h', 'l':
+				speaker.Lock()
+				newPos := p.streamer.Position()
+				if key == 'h' {
+					newPos -= p.sampleRate.N(10 * time.Second)
 				}
-				player.SetVolume(player.Volume() - 0.1)
+				if key == 'l' {
+					newPos += p.sampleRate.N(10 * time.Second)
+				}
+				if newPos < 0 {
+					newPos = 0
+				}
+				if newPos >= p.streamer.Len() {
+					newPos = p.streamer.Len() - 1
+				}
+				if err := p.streamer.Seek(newPos); err != nil {
+					panic("Seek: " + err.Error())
+				}
+				speaker.Unlock()
 			}
 
-		default:
-			if !player.IsPlaying() && !paused {
-				break Main
+		case <-round:
+			if p.ctrl.Paused {
+				continue
 			}
-			percent := float64(mr.count) / float64(total)
-			done := int(percent * float64(width))
-			fill := width - int(done)
-			fmt.Printf("\r\r(%02d)[%s%s] %.1f%% ", int(10*player.Volume()), strings.Repeat("#", done), strings.Repeat(" ", fill), percent*100)
-			time.Sleep(100 * time.Microsecond)
+			d.update(p)
 		}
 	}
-}
-
-func newMp3Reader(fd *os.File) (*mp3Reader, error) {
-	decodedMp3, err := mp3.NewDecoder(fd)
-	if err != nil {
-		return nil, err
-	}
-
-	return &mp3Reader{
-		decoder: decodedMp3,
-		Length:  decodedMp3.Length(),
-	}, nil
-}
-
-type mp3Reader struct {
-	decoder *mp3.Decoder
-	count   int64
-	Length  int64
-}
-
-func (mr *mp3Reader) Read(p []byte) (n int, err error) {
-	n, err = mr.decoder.Read(p)
-	mr.count += int64(n)
-	return n, err
 }
