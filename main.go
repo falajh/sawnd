@@ -46,7 +46,7 @@ type display struct {
 func (d *display) init() (keyCh chan byte) {
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		panic("term.MakeRaw failed: " + err.Error())
+		panic("term.MakeRaw: " + err.Error())
 	}
 	d.oldState = oldState
 
@@ -70,7 +70,7 @@ func (d *display) init() (keyCh chan byte) {
 		for range widthCh {
 			width, _, err := term.GetSize(int(os.Stdout.Fd()))
 			if err != nil {
-				panic("Cannot get the terminal width " + err.Error())
+				panic("term.GetSize: " + err.Error())
 			}
 			width -= 20
 			d.width = width
@@ -109,14 +109,13 @@ func main() {
 
 	fd, err := os.Open(os.Args[1])
 	if err != nil {
-		panic("opening my-file.mp3 failed: " + err.Error())
+		panic("os.Open: " + err.Error())
 	}
 	defer fd.Close()
 
 	streamer, format, err := mp3.Decode(fd)
-	// d, err := newMp3Decoder(fd)
 	if err != nil {
-		panic("cannot create mp3Reader: " + err.Error())
+		panic("mp3.decode: " + err.Error())
 	}
 	defer streamer.Close()
 
@@ -124,14 +123,13 @@ func main() {
 
 	p := newPlayer(format.SampleRate, streamer)
 
-	// Switch terminal to raw mode so we can read keypresses instantly
 	d := display{}
 	keyCh := d.init()
 	defer d.reset()
 
-	round := time.Tick(100 * time.Microsecond)
 	p.play()
 	d.update(p)
+	round := time.Tick(100 * time.Microsecond)
 	for {
 		select {
 		case key := <-keyCh:
