@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github/MJ-NMR/sawnd/audio"
+	"github/MJ-NMR/sawnd/lrc"
 	"os"
 	"os/signal"
 	"strconv"
@@ -9,48 +11,42 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/faiface/beep"
-	"github.com/faiface/beep/effects"
-	"github.com/faiface/beep/mp3"
-	"github.com/faiface/beep/speaker"
 	"golang.org/x/term"
 )
 
-type player struct {
-	sampleRate beep.SampleRate
-	streamer   beep.StreamSeeker
-	ctrl       *beep.Ctrl
-	volume     *effects.Volume
-	finished   bool
+type module struct {
+	ls           *lrc.LyrcsSyncer
+	ap           *audio.Player
+	termWidth    int
+	termOldState *term.State
 }
 
-func newPlayer(sampleRate beep.SampleRate, streamer beep.StreamSeeker, loop int) *player {
-	ctrl := &beep.Ctrl{Streamer: beep.Loop(loop, streamer)}
-	resampler := beep.ResampleRatio(4, 1, ctrl)
-	volume := &effects.Volume{Streamer: resampler, Base: 2}
-	return &player{
-		sampleRate: sampleRate,
-		streamer:   streamer,
-		ctrl:       ctrl,
-		volume:     volume,
-	}
+func (m *module) start() {
+	m.ap.Play()
+	m.ls.Sync(m.ap)
 }
 
-func (p *player) play() {
-	speaker.Play(beep.Seq(p.volume, beep.Callback(func() { p.finished = true })))
-}
+func (m *module) setupTerm() (keyCh chan byte) {
+	go func() {
+		widthCh := make(chan os.Signal, 1)
+		signal.Notify(widthCh, syscall.SIGWINCH)
 
-type display struct {
-	width    int
-	oldState *term.State
-}
+		widthCh <- nil
+		for range widthCh {
+			width, _, err := term.GetSize(int(os.Stdout.Fd()))
+			if err != nil {
+				panic("term.GetSize: " + err.Error())
+			}
+			width -= 20
+			m.termWidth = width
+		}
+	}()
 
-func (d *display) init() (keyCh chan byte) {
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		panic("term.MakeRaw: " + err.Error())
 	}
-	d.oldState = oldState
+	m.termOldState = oldState
 
 	keyCh = make(chan byte)
 	go func() {
@@ -64,49 +60,34 @@ func (d *display) init() (keyCh chan byte) {
 		}
 	}()
 
-	go func() {
-		widthCh := make(chan os.Signal, 1)
-		signal.Notify(widthCh, syscall.SIGWINCH)
-
-		widthCh <- nil
-		for range widthCh {
-			width, _, err := term.GetSize(int(os.Stdout.Fd()))
-			if err != nil {
-				panic("term.GetSize: " + err.Error())
-			}
-			width -= 20
-			d.width = width
-		}
-	}()
-
 	return keyCh
 }
 
-func (d *display) reset() {
-	term.Restore(int(os.Stdin.Fd()), d.oldState)
+func (m *module) resetTerm() {
+	term.Restore(int(os.Stdin.Fd()), m.termOldState)
 
 }
+func formatTime(d time.Duration) string {
+	m, s := int(d.Minutes())%60, int(d.Seconds())%60
+	return fmt.Sprintf("%02d:%02d", m, s)
+}
 
-func (d *display) update(p *player) {
-	speaker.Lock()
-	position := p.sampleRate.D(p.streamer.Position())
-	length := p.sampleRate.D(p.streamer.Len())
-	pres := position.Seconds() / length.Seconds()
-	done := int(pres * float64(d.width))
-	hashtag := strings.Repeat("#", done)
-	space := strings.Repeat(" ", d.width-done)
-	volume := p.volume.Volume
-	// speed := ap.resampler.Ratio()
-	speaker.Unlock()
-	positionFormat := fmt.Sprintf("%02d:%02d", int(position.Minutes())%60, int(position.Seconds())%60)
-	totalFormat := fmt.Sprintf("%02d:%02d", int(length.Minutes())%60, int(length.Seconds())%60)
-	fmt.Printf("\r\r(%02d)[%s%s] %s/%s ", int(10*volume), hashtag, space, positionFormat, totalFormat)
+func (m *module) update() {
+	m.ap.Update()
+	positionFormat := formatTime(m.ap.Position)
+	totalFormat := formatTime(m.ap.Total)
+	hashtag := strings.Repeat("#", int(m.ap.Done*float64(m.termWidth)))
+	space := strings.Repeat(" ", m.termWidth-int(m.ap.Done*float64(m.termWidth)))
+	fmt.Printf("\r\r(%02d)[%s%s] %s/%s ", m.ap.V, hashtag, space, positionFormat, totalFormat)
+}
+func exitWithHelp() {
+	println("sawnd <file.mp3> [ --loop <looptimes | -1 infinitely> ]")
+	os.Exit(1)
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		println("sawnd <file.mp3> [ --loop <looptimes | -1 infinitely> ]")
-		os.Exit(1)
+		exitWithHelp()
 	}
 
 	fd, err := os.Open(os.Args[1])
@@ -114,81 +95,74 @@ func main() {
 		panic("os.Open: " + err.Error())
 	}
 	defer fd.Close()
-	loop := 1
-	if len(os.Args) == 4 && os.Args[2] == "--loop" {
-		loop, err = strconv.Atoi(os.Args[3])
-		if err != nil {
-			println("sawnd <file.mp3> [ --loop <looptimes | -1 infinitely> ]")
-			os.Exit(1)
+
+	loops := 1
+	lrcsPath := ""
+	switch len(os.Args) {
+	case 4:
+		switch os.Args[2] {
+		case "--loop":
+			loops, err = strconv.Atoi(os.Args[3])
+			if err != nil {
+				exitWithHelp()
+			}
+		case "--lrc":
+			lrcsPath = os.Args[3]
 		}
 	}
 
-	streamer, format, err := mp3.Decode(fd)
+	ls, err := lrc.NewLyrcsSyncer(lrcsPath)
 	if err != nil {
-		panic("mp3.decode: " + err.Error())
+		fmt.Println(err)
+		exitWithHelp()
 	}
-	defer streamer.Close()
 
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
+	ap, err := audio.NewPlayer(fd, loops)
+	if err != nil {
+		fmt.Println(err)
+		exitWithHelp()
+	}
 
-	p := newPlayer(format.SampleRate, streamer, loop)
+	m := module{
+		ap: ap,
+		ls: ls,
+	}
 
-	d := display{}
-	keyCh := d.init()
-	defer d.reset()
+	keyCh := m.setupTerm()
+	defer m.resetTerm()
 
-	p.play()
-	d.update(p)
+	m.start()
+	m.update()
 	round := time.Tick(100 * time.Microsecond)
 	for {
 		select {
 		case key := <-keyCh:
 			switch key {
 			case ' ':
-				speaker.Lock()
-				p.ctrl.Paused = !p.ctrl.Paused
-				speaker.Unlock()
+				m.ap.TogglePause()
 			case 'q', 3: // 3 = Ctrl+C
 				return
-			case 'j', 'k':
-				speaker.Lock()
-				v := 0.1
-				if key == 'j' {
-					v = -0.1
-				}
-				p.volume.Volume += v
-				speaker.Unlock()
-			case 'h', 'l':
-				speaker.Lock()
-				newPos := p.streamer.Position()
-				if key == 'h' {
-					newPos -= p.sampleRate.N(10 * time.Second)
-				}
-				if key == 'l' {
-					newPos += p.sampleRate.N(10 * time.Second)
-				}
-				if newPos < 0 {
-					newPos = 0
-				}
-				if newPos >= p.streamer.Len() {
-					newPos = p.streamer.Len() - 1
-				}
-				if err := p.streamer.Seek(newPos); err != nil {
-					panic("Seek: " + err.Error())
-				}
-				speaker.Unlock()
+			case 'k':
+				m.ap.ChangeValume(1)
+			case 'j':
+				m.ap.ChangeValume(-1)
+			case 'h':
+				m.ap.Seek(-10)
+			case 'l':
+				m.ap.Seek(+10)
 			}
-
+		case l := <-m.ls.ReadyQuie:
+			fmt.Printf("\n\r%s", l.Line)
 		case <-round:
-			if p.ctrl.Paused {
+			if m.ap.P {
 				continue
 			}
 
-			if p.finished {
+			if m.ap.Finished {
 				return
 			}
 
-			d.update(p)
+			m.update()
 		}
 	}
 }
