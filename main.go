@@ -1,20 +1,21 @@
 package main
 
 import (
+	"charm.land/bubbles/v2/viewport"
 	"fmt"
 	"github/MJ-NMR/sawnd/audio"
 	"github/MJ-NMR/sawnd/lrc"
+	"golang.org/x/term"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-
-	"golang.org/x/term"
 )
 
 type module struct {
+	vp           viewport.Model
 	ls           *lrc.LyrcsSyncer
 	ap           *audio.Player
 	termWidth    int
@@ -37,7 +38,6 @@ func (m *module) setupTerm() (keyCh chan byte) {
 			if err != nil {
 				panic("term.GetSize: " + err.Error())
 			}
-			width -= 20
 			m.termWidth = width
 		}
 	}()
@@ -59,26 +59,73 @@ func (m *module) setupTerm() (keyCh chan byte) {
 			keyCh <- buf[0]
 		}
 	}()
+	hideCurser()
 
 	return keyCh
 }
 
 func (m *module) resetTerm() {
+	showCurser()
 	term.Restore(int(os.Stdin.Fd()), m.termOldState)
-
 }
+
 func formatTime(d time.Duration) string {
 	m, s := int(d.Minutes())%60, int(d.Seconds())%60
 	return fmt.Sprintf("%02d:%02d", m, s)
 }
 
+const EraseEntireLine = "\x1b[2K"
+
+func hideCurser() {
+	fmt.Print("\x1b[?25l")
+}
+
+func showCurser() {
+	fmt.Print("\x1b[?25h")
+}
+
+func cursorDown(n int) {
+	var s string
+	if n > 1 {
+		s = strconv.Itoa(n)
+	}
+	fmt.Print("\x1b[" + s + "B")
+}
+
+func cursorUp(n string) {
+	fmt.Printf("\x1b[%sA", n)
+}
+
 func (m *module) update() {
 	m.ap.Update()
+	if m.termWidth <= 0 {
+		return
+	}
 	positionFormat := formatTime(m.ap.Position)
 	totalFormat := formatTime(m.ap.Total)
-	hashtag := strings.Repeat("#", int(m.ap.Done*float64(m.termWidth)))
-	space := strings.Repeat(" ", m.termWidth-int(m.ap.Done*float64(m.termWidth)))
-	fmt.Printf("\r\r(%02d)[%s%s] %s/%s ", m.ap.V, hashtag, space, positionFormat, totalFormat)
+	fill := int(m.ap.Done * float64(m.termWidth-2.0))
+	hashtag := strings.Repeat("#", fill)
+	gap := m.termWidth - fill - 2
+	space := strings.Repeat(" ", gap)
+	line1 := EraseEntireLine + fmt.Sprintf("\r\r[%s%s]\r\n", hashtag, space)
+
+	gap = m.termWidth - 2 - len(positionFormat) - len(totalFormat) - 5
+	space = strings.Repeat(" ", gap)
+	line2 := EraseEntireLine + fmt.Sprintf(" V %02d%s%s/%s \r\n", m.ap.V, space, positionFormat, totalFormat)
+
+	gap = int((float64(m.termWidth) - float64(len(m.ls.Current.Line))) / 2.0)
+	space = ""
+	if gap > 0 {
+		space = strings.Repeat(" ", gap)
+	}
+	line3 := EraseEntireLine + space + m.ls.Current.Line
+	if m.ls.Current.Line == "" {
+		line3 = EraseEntireLine + strings.Repeat(" ", m.termWidth)
+	}
+
+	cursorUp("2")
+	fmt.Print(line1, line2, line3)
+
 }
 func exitWithHelp() {
 	println("sawnd <file.mp3> [ --loop <looptimes | -1 infinitely> ]")
@@ -132,6 +179,7 @@ func main() {
 	defer m.resetTerm()
 
 	m.start()
+	cursorDown(2)
 	m.update()
 	round := time.Tick(100 * time.Microsecond)
 	for {
@@ -141,6 +189,7 @@ func main() {
 			case ' ':
 				m.ap.TogglePause()
 			case 'q', 3: // 3 = Ctrl+C
+				fmt.Println()
 				return
 			case 'k':
 				m.ap.ChangeValume(1)
@@ -151,8 +200,8 @@ func main() {
 			case 'l':
 				m.ap.Seek(+10)
 			}
-		case l := <-m.ls.ReadyQuie:
-			fmt.Printf("\n\r%s", l.Line)
+		case <-m.ls.ReadyQuie:
+			continue
 		case <-round:
 			if m.ap.P {
 				continue

@@ -16,6 +16,7 @@ type Lrxqiue chan lrc
 type LyrcsSyncer struct {
 	ReadyQuie Lrxqiue
 	input     Lrxqiue
+	Current   lrc
 }
 
 type lrc struct {
@@ -35,6 +36,7 @@ func (ls *LyrcsSyncer) Sync(ap *audio.Player) {
 			for {
 				if l.d <= ap.Position {
 					ls.ReadyQuie <- l
+					ls.Current = l
 					break
 				}
 				time.Sleep(time.Millisecond)
@@ -63,6 +65,7 @@ func formatLrcs(br *bufio.Reader, lrcCh chan lrc) {
 			}
 			return
 		}
+		line = line[:len(line)-1]
 		sublines := strings.SplitN(line[1:], "] ", 2)
 		if len(sublines) < 2 {
 			lrcCh <- lrc{Err: true, Line: "Coudn't parse lrc line format"}
