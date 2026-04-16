@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -104,7 +105,7 @@ func (d *display) update(p *player) {
 
 func main() {
 	if len(os.Args) < 2 {
-		println("sawnd <file.mp3> [ -l | --loop ]")
+		println("sawnd <file.mp3> [ --loop <looptimes | -1 infinitely> ]")
 		os.Exit(1)
 	}
 
@@ -114,8 +115,12 @@ func main() {
 	}
 	defer fd.Close()
 	loop := 1
-	if len(os.Args) >= 3 && (os.Args[2] == "-l" || os.Args[2] == "--loop") {
-		loop = -1
+	if len(os.Args) == 4 && os.Args[2] == "--loop" {
+		loop, err = strconv.Atoi(os.Args[3])
+		if err != nil {
+			println("sawnd <file.mp3> [ --loop <looptimes | -1 infinitely> ]")
+			os.Exit(1)
+		}
 	}
 
 	streamer, format, err := mp3.Decode(fd)
