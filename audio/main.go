@@ -2,6 +2,7 @@ package audio
 
 import (
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/faiface/beep"
@@ -21,10 +22,11 @@ type Player struct {
 	streamer   beep.StreamSeeker
 	ctrl       *beep.Ctrl
 	volume     *effects.Volume
+	fd         *os.File
 }
 
 func (p *Player) Play() {
-	speaker.Play(beep.Seq(p.volume, beep.Callback(func() { p.Finished = true })))
+	speaker.Play(beep.Seq(p.volume, beep.Callback(func() { p.Finished = true; p.fd.Close() })))
 }
 
 func (p *Player) Seek(factor int) {
@@ -62,18 +64,33 @@ func (p *Player) ChangeValume(factor int) {
 	speaker.Unlock()
 }
 
-func NewPlayer(fd *os.File, loops int) (*Player, error) {
+func NewPlayer(mp3Path string, loop string) (*Player, error) {
+	fd, err := os.Open(mp3Path)
+	if err != nil {
+		return nil, err
+	}
+
 	streamer, format, err := mp3.Decode(fd)
 	if err != nil {
 		return nil, err
 	}
 
+	if loop == "" {
+		loop = "1"
+	}
+	loopN, err := strconv.Atoi(loop)
+	if err != nil {
+		return nil, err
+	}
+
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
-	ctrl := &beep.Ctrl{Streamer: beep.Loop(loops, streamer)}
+	ctrl := &beep.Ctrl{Streamer: beep.Loop(loopN, streamer)}
 	resampler := beep.ResampleRatio(4, 1, ctrl)
 	volume := &effects.Volume{Streamer: resampler, Base: 2}
 	total := format.SampleRate.D(streamer.Len())
+
 	return &Player{
+		fd:         fd,
 		sampleRate: format.SampleRate,
 		streamer:   streamer,
 		ctrl:       ctrl,

@@ -14,9 +14,8 @@ import (
 type Lrxqiue chan lrc
 
 type LyrcsSyncer struct {
-	ReadyQuie Lrxqiue
-	input     Lrxqiue
-	Current   lrc
+	input   Lrxqiue
+	Current lrc
 }
 
 type lrc struct {
@@ -26,7 +25,6 @@ type lrc struct {
 }
 
 func (ls *LyrcsSyncer) Sync(ap *audio.Player) {
-	ls.ReadyQuie = make(Lrxqiue)
 	go func() {
 		for l := range ls.input {
 			if l.Err {
@@ -35,7 +33,6 @@ func (ls *LyrcsSyncer) Sync(ap *audio.Player) {
 			}
 			for {
 				if l.d <= ap.Position {
-					ls.ReadyQuie <- l
 					ls.Current = l
 					break
 				}
@@ -46,17 +43,21 @@ func (ls *LyrcsSyncer) Sync(ap *audio.Player) {
 }
 
 func NewLyrcsSyncer(path string) (*LyrcsSyncer, error) {
+	if path == "" {
+		return nil, nil
+	}
 	fd, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	br := bufio.NewReader(fd)
 	initQiue := make(Lrxqiue)
-	go formatLrcs(br, initQiue)
+	go formatLrcs(br, initQiue, fd.Close)
 	return &LyrcsSyncer{input: initQiue}, nil
 }
 
-func formatLrcs(br *bufio.Reader, lrcCh chan lrc) {
+func formatLrcs(br *bufio.Reader, lrcCh Lrxqiue, closeFd func() error) {
+	defer closeFd()
 	for {
 		line, err := br.ReadString('\n')
 		if err != nil {
