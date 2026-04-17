@@ -71,6 +71,7 @@ func main() {
 			case ' ':
 				m.ap.TogglePause()
 			case 'q', 3: // 3 = Ctrl+C
+				fmt.Println("\r")
 				return
 			case 'k':
 				m.ap.ChangeValume(1)
