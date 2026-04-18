@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-type Lrxqiue chan lrc
-
 type LyrcsSyncer struct {
 	qiue    []lrc
 	Current lrc
@@ -38,14 +36,12 @@ func (ls *LyrcsSyncer) Sync(ap *audio.Player) {
 				}
 				if nextLrc.d <= ap.Position {
 					ls.Current = nextLrc
-					break
+					i++
+					if i < len(ls.qiue) {
+						break
+					}
 				}
 				time.Sleep(time.Millisecond)
-			}
-
-			i++
-			if i > len(ls.qiue) {
-				i--
 			}
 		}
 	}()
