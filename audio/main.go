@@ -35,19 +35,22 @@ func (p *Player) Seek(factor int) {
 	if factor < 1 {
 		factor *= -1
 		newPos -= p.sampleRate.N(time.Duration(factor) * time.Second)
-	}
-	if factor > 1 {
+	} else {
 		newPos += p.sampleRate.N(time.Duration(factor) * time.Second)
 	}
+
 	if newPos < 0 {
 		newPos = 0
 	}
+
 	if newPos >= p.streamer.Len() {
 		newPos = p.streamer.Len() - 1
 	}
+
 	if err := p.streamer.Seek(newPos); err != nil {
 		panic("Seek: " + err.Error())
 	}
+
 	speaker.Unlock()
 }
 

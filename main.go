@@ -71,7 +71,6 @@ func main() {
 			case ' ':
 				m.ap.TogglePause()
 			case 'q', 3: // 3 = Ctrl+C
-				fmt.Println("\r")
 				return
 			case 'k':
 				m.ap.ChangeValume(1)
@@ -151,6 +150,7 @@ func (m *module) setupTerm() (keyCh chan byte) {
 func (m *module) resetTerm() {
 	fmt.Print(ansi.ShowCursor)
 	term.Restore(int(os.Stdin.Fd()), m.termOldState)
+	fmt.Println("\r")
 }
 
 func formatTime(d time.Duration) string {

@@ -1,10 +1,8 @@
 package lrc
 
 import (
-	"bufio"
 	"fmt"
 	"github/MJ-NMR/sawnd/audio"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -14,7 +12,7 @@ import (
 type Lrxqiue chan lrc
 
 type LyrcsSyncer struct {
-	input   Lrxqiue
+	qiue    []lrc
 	Current lrc
 }
 
@@ -26,17 +24,28 @@ type lrc struct {
 
 func (ls *LyrcsSyncer) Sync(ap *audio.Player) {
 	go func() {
-		for l := range ls.input {
-			if l.Err {
-				fmt.Println(l.Line)
+		var i int
+		for {
+			nextLrc := ls.qiue[i]
+			if nextLrc.Err {
+				fmt.Println(nextLrc.Line)
 				os.Exit(1)
 			}
 			for {
-				if l.d <= ap.Position {
-					ls.Current = l
+				if ls.Current.d > ap.Position {
+					i = 0
+					nextLrc = ls.qiue[i]
+				}
+				if nextLrc.d <= ap.Position {
+					ls.Current = nextLrc
 					break
 				}
 				time.Sleep(time.Millisecond)
+			}
+
+			i++
+			if i > len(ls.qiue) {
+				i--
 			}
 		}
 	}()
@@ -46,46 +55,37 @@ func NewLyrcsSyncer(path string) (*LyrcsSyncer, error) {
 	if path == "" {
 		return nil, nil
 	}
-	fd, err := os.Open(path)
+	f, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	br := bufio.NewReader(fd)
-	initQiue := make(Lrxqiue)
-	go formatLrcs(br, initQiue, fd.Close)
-	return &LyrcsSyncer{input: initQiue}, nil
+	lines := strings.Split(string(f), "\n")
+	qiue := make([]lrc, len(lines))
+	formatLrcs(lines, qiue)
+	return &LyrcsSyncer{qiue: qiue}, nil
 }
 
-func formatLrcs(br *bufio.Reader, lrcCh Lrxqiue, closeFd func() error) {
-	defer closeFd()
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil {
-			if err != io.EOF {
-				lrcCh <- lrc{Err: true, Line: err.Error()}
-			}
-			return
-		}
-		line = line[:len(line)-1]
+func formatLrcs(lines []string, qiue []lrc) {
+	for i, line := range lines {
 		sublines := strings.SplitN(line[1:], "] ", 2)
 		if len(sublines) < 2 {
-			lrcCh <- lrc{Err: true, Line: "Coudn't parse lrc line format"}
+			qiue[i] = lrc{Err: true, Line: "Coudn't parse lrc line format"}
 			return
 		}
 		times := strings.Split(sublines[0][1:], ":")
 
 		sec, err := strconv.ParseFloat(times[1], 32)
 		if err != nil {
-			lrcCh <- lrc{Err: true, Line: "Coudn't parse secend format"}
+			qiue[i] = lrc{Err: true, Line: "Coudn't parse secend format"}
 			return
 		}
 		m, err := strconv.Atoi(times[0])
 		if err != nil {
-			lrcCh <- lrc{Err: true, Line: "Coudn't parse minutes format"}
+			qiue[i] = lrc{Err: true, Line: "Coudn't parse minutes format"}
 			return
 		}
 
 		d := time.Duration(float64(m)*float64(time.Minute) + sec*float64(time.Second))
-		lrcCh <- lrc{d: d, Line: sublines[1], Err: false}
+		qiue[i] = lrc{d: d, Line: sublines[1], Err: false}
 	}
 }
