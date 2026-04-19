@@ -65,7 +65,7 @@ func main() {
 				m.ap.seek(+10)
 			}
 		case <-round:
-			if m.ap.paused() {
+			if m.ap.Paused {
 				continue
 			}
 

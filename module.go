@@ -75,7 +75,7 @@ func (m *module) update() {
 		return
 	}
 
-	done := m.ap.position() * 100 / m.ap.len()
+	done := m.ap.Position() * 100 / m.ap.Len()
 	fill := (done * (m.termWidth - 2)) / 100
 
 	hashtag := ansi.NewStyle(ansi.AttrYellowBackgroundColor).Styled(strings.Repeat(" ", fill))
@@ -83,8 +83,8 @@ func (m *module) update() {
 	space := ansi.NewStyle(ansi.AttrBrightBlackBackgroundColor).Styled(strings.Repeat(" ", gap))
 	line1 := fmt.Sprintf("\r\r %s%s \r\n", hashtag, space)
 
-	positionFormat := ansi.NewStyle(ansi.AttrUnderline).Styled(formatTime(m.ap.positionD()))
-	lenghtFormat := ansi.NewStyle(ansi.AttrUnderline).Styled(formatTime(m.ap.lenD()))
+	positionFormat := ansi.NewStyle(ansi.AttrUnderline).Styled(formatTime(m.ap.D(m.ap.Position())))
+	lenghtFormat := ansi.NewStyle(ansi.AttrUnderline).Styled(formatTime(m.ap.D(m.ap.Len())))
 	gap = m.termWidth - len(positionFormat+lenghtFormat) + 2
 	space = strings.Repeat(" ", gap)
 	line2 := fmt.Sprintf("\r\r Volume %02d%s%s/%s\r\n", m.ap.volume(), space, positionFormat, lenghtFormat)

@@ -26,23 +26,23 @@ func newAudioPlayer(mp3Path string, loop int) (*audioPlayer, error) {
 	ctrl := &beep.Ctrl{Streamer: volumeChanger}
 
 	return &audioPlayer{
-		fd:         fd,
-		sampleRate: format.SampleRate,
-		seeker:     seeker,
-		streamer:   ctrl,
-		volumer:    volumeChanger,
+		fd:               fd,
+		SampleRate:       format.SampleRate,
+		StreamSeekCloser: seeker,
+		Ctrl:             ctrl,
+		volumer:          volumeChanger,
 	}, nil
 
 }
 
 type audioPlayer struct {
-	seeker     beep.StreamSeekCloser
-	sampleRate beep.SampleRate
-	streamer   *beep.Ctrl
-	volumer    *effects.Volume
-	fd         *os.File
-	done       float64
-	finished   bool
+	beep.StreamSeekCloser
+	*beep.Ctrl
+	beep.SampleRate
+	volumer  *effects.Volume
+	fd       *os.File
+	done     float64
+	finished bool
 }
 
 func (ap *audioPlayer) play() {
@@ -50,31 +50,11 @@ func (ap *audioPlayer) play() {
 }
 
 func (ap *audioPlayer) Stream(samples [][2]float64) (n int, ok bool) {
-	return ap.streamer.Stream(samples)
+	return ap.Ctrl.Stream(samples)
 }
 
 func (ap *audioPlayer) Err() error {
-	return ap.streamer.Err()
-}
-
-func (ap *audioPlayer) position() int {
-	return ap.seeker.Position()
-}
-
-func (ap *audioPlayer) positionD() time.Duration {
-	return ap.sampleRate.D(ap.position())
-}
-
-func (ap *audioPlayer) len() int {
-	return ap.seeker.Len()
-}
-
-func (ap *audioPlayer) lenD() time.Duration {
-	return ap.sampleRate.D(ap.seeker.Len())
-}
-
-func (ap *audioPlayer) paused() bool {
-	return ap.streamer.Paused
+	return ap.Ctrl.Err()
 }
 
 func (ap *audioPlayer) volume() int {
@@ -83,23 +63,23 @@ func (ap *audioPlayer) volume() int {
 
 func (ap *audioPlayer) seek(factor int) {
 	speaker.Lock()
-	newPos := ap.position()
+	newPos := ap.Position()
 	if factor < 1 {
 		factor *= -1
-		newPos -= ap.sampleRate.N(time.Duration(factor) * time.Second)
+		newPos -= ap.N(time.Duration(factor) * time.Second)
 	} else {
-		newPos += ap.sampleRate.N(time.Duration(factor) * time.Second)
+		newPos += ap.N(time.Duration(factor) * time.Second)
 	}
 
 	if newPos < 0 {
 		newPos = 0
 	}
 
-	if newPos >= ap.len() {
-		newPos = ap.len() - 1
+	if newPos >= ap.Len() {
+		newPos = ap.Len() - 1
 	}
 
-	if err := ap.seeker.Seek(newPos); err != nil {
+	if err := ap.Seek(newPos); err != nil {
 		panic("Seek: " + err.Error())
 	}
 
@@ -108,7 +88,7 @@ func (ap *audioPlayer) seek(factor int) {
 
 func (ap *audioPlayer) togglePause() {
 	speaker.Lock()
-	ap.streamer.Paused = !ap.streamer.Paused
+	ap.Paused = !ap.Paused
 	speaker.Unlock()
 }
 
