@@ -10,11 +10,15 @@ import (
 func main() {
 	flagParser := flag.NewFlagSet("", flag.ExitOnError)
 	flagParser.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s <file.mp3> [OPTIONS]\n\r OPTIONS:\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <file.mp3> [OPTION]...\n\r OPTIONS:\n", os.Args[0])
 		flagParser.PrintDefaults()
 	}
-	loops := flagParser.Int("loop", 1, "how many loops, -1 for infinitely.")
-	lrcsPath := flagParser.String("lrc", "", "lrcs file.")
+	loops := flagParser.Int("loop", 1, "How many loops, -1 for infinitely.")
+	lrcsPath := flagParser.String("lrc", "", "Lrcs file path.")
+	if len(os.Args) < 2 {
+		flagParser.Usage()
+		os.Exit(2)
+	}
 	flagParser.Parse(os.Args[2:])
 
 	ls, err := newLyrcsSyncer(*lrcsPath)
