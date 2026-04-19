@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/faiface/beep"
@@ -11,7 +10,7 @@ import (
 	"github.com/faiface/beep/speaker"
 )
 
-func newAudioPlayer(mp3Path string, loop string) (*audioPlayer, error) {
+func newAudioPlayer(mp3Path string, loop int) (*audioPlayer, error) {
 	fd, err := os.Open(mp3Path)
 	if err != nil {
 		return nil, err
@@ -22,17 +21,8 @@ func newAudioPlayer(mp3Path string, loop string) (*audioPlayer, error) {
 		return nil, err
 	}
 
-	if loop == "" {
-		loop = "1"
-	}
-
-	loopN, err := strconv.Atoi(loop)
-	if err != nil {
-		return nil, err
-	}
-
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
-	volumeChanger := &effects.Volume{Streamer: beep.Loop(loopN, seeker), Base: 2}
+	volumeChanger := &effects.Volume{Streamer: beep.Loop(loop, seeker), Base: 2}
 	ctrl := &beep.Ctrl{Streamer: volumeChanger}
 
 	return &audioPlayer{

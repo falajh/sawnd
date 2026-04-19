@@ -1,47 +1,34 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"time"
 )
 
 func main() {
-	loops := ""
-	lrcsPath := ""
-	if len(os.Args) >= 4 {
-		switch os.Args[2] {
-		case "--loop":
-			loops = os.Args[3]
-		case "--lrc":
-			lrcsPath = os.Args[3]
-		default:
-			exitWithHelp()
-		}
+	flagParser := flag.NewFlagSet("", flag.ExitOnError)
+	flagParser.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s <file.mp3> [OPTIONS]\n\r OPTIONS:\n", os.Args[0])
+		flagParser.PrintDefaults()
 	}
-	if len(os.Args) == 6 {
-		if os.Args[4] == "--loop" && loops == "" {
-			loops = os.Args[5]
-		} else if os.Args[4] == "--lrc" && lrcsPath == "" {
-			lrcsPath = os.Args[5]
-		} else {
-			exitWithHelp()
-		}
-	}
-	if len(os.Args) < 2 {
-		exitWithHelp()
+	loops := flagParser.Int("loop", 1, "how many loops, -1 for infinitely.")
+	lrcsPath := flagParser.String("lrc", "", "lrcs file.")
+	flagParser.Parse(os.Args[2:])
+
+	ls, err := newLyrcsSyncer(*lrcsPath)
+	if err != nil {
+		fmt.Printf("lrc.NewLyrcsSyncer: %v\n\n", err)
+		flagParser.Usage()
+		os.Exit(2)
 	}
 
-	ls, err := newLyrcsSyncer(lrcsPath)
+	ap, err := newAudioPlayer(os.Args[1], *loops)
 	if err != nil {
-		fmt.Println("lrc.NewLyrcsSyncer: ", err)
-		exitWithHelp()
-	}
-
-	ap, err := newAudioPlayer(os.Args[1], loops)
-	if err != nil {
-		fmt.Println("audio.NewPlayer: ", err)
-		exitWithHelp()
+		fmt.Printf("audio.NewPlayer: %v\n\n", err)
+		flagParser.Usage()
+		os.Exit(2)
 	}
 
 	m := module{
@@ -85,9 +72,4 @@ func main() {
 			m.update()
 		}
 	}
-}
-
-func exitWithHelp() {
-	println("sawnd <file.mp3> [ --loop <looptimes | -1 infinitely> ]")
-	os.Exit(1)
 }
