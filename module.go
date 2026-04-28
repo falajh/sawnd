@@ -31,7 +31,7 @@ func (m *module) setupTerm() (keyCh chan byte) {
 		widthCh := make(chan os.Signal, 1)
 		signal.Notify(widthCh, syscall.SIGWINCH)
 
-		widthCh <- nil
+		widthCh <- syscall.SIGWINCH
 		for range widthCh {
 			width, _, err := term.GetSize(int(os.Stdout.Fd()))
 			if err != nil {
