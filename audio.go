@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/mp3"
@@ -15,16 +16,13 @@ func newAudioPlayer(mp3Path string, loop int) (*audioPlayer, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	seeker, format, err := mp3.Decode(fd)
 	if err != nil {
 		return nil, err
 	}
-
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
 	volumeChanger := &effects.Volume{Streamer: beep.Loop(loop, seeker), Base: 2}
 	ctrl := &beep.Ctrl{Streamer: volumeChanger}
-
 	return &audioPlayer{
 		fd:               fd,
 		SampleRate:       format.SampleRate,
@@ -32,29 +30,28 @@ func newAudioPlayer(mp3Path string, loop int) (*audioPlayer, error) {
 		Ctrl:             ctrl,
 		volumer:          volumeChanger,
 	}, nil
-
 }
 
 type audioPlayer struct {
 	beep.StreamSeekCloser
 	*beep.Ctrl
 	beep.SampleRate
-	volumer  *effects.Volume
-	fd       *os.File
-	done     float64
-	finished bool
+	volumer *effects.Volume
+	fd      *os.File
+	program *tea.Program // set after program is created
 }
 
 func (ap *audioPlayer) play() {
-	speaker.Play(beep.Seq(ap, beep.Callback(func() { ap.finished = true; ap.fd.Close() })))
+	speaker.Play(beep.Seq(ap.Ctrl, beep.Callback(func() {
+		ap.fd.Close()
+		if ap.program != nil {
+			ap.program.Send(finishedMsg{})
+		}
+	})))
 }
 
-func (ap *audioPlayer) Stream(samples [][2]float64) (n int, ok bool) {
-	return ap.Ctrl.Stream(samples)
-}
-
-func (ap *audioPlayer) Err() error {
-	return ap.Ctrl.Err()
+func (ap *audioPlayer) positionD() time.Duration {
+	return ap.SampleRate.D(ap.Position())
 }
 
 func (ap *audioPlayer) volume() int {
@@ -63,27 +60,18 @@ func (ap *audioPlayer) volume() int {
 
 func (ap *audioPlayer) seek(factor int) {
 	speaker.Lock()
+	defer speaker.Unlock()
 	newPos := ap.Position()
-	if factor < 1 {
-		factor *= -1
-		newPos -= ap.N(time.Duration(factor) * time.Second)
+	secs := time.Duration(abs(factor)) * time.Second
+	if factor < 0 {
+		newPos -= ap.N(secs)
 	} else {
-		newPos += ap.N(time.Duration(factor) * time.Second)
+		newPos += ap.N(secs)
 	}
-
-	if newPos < 0 {
-		newPos = 0
-	}
-
-	if newPos >= ap.Len() {
-		newPos = ap.Len() - 1
-	}
-
+	newPos = clamp(newPos, 0, ap.Len()-1)
 	if err := ap.Seek(newPos); err != nil {
 		panic("Seek: " + err.Error())
 	}
-
-	speaker.Unlock()
 }
 
 func (ap *audioPlayer) togglePause() {
@@ -97,3 +85,21 @@ func (ap *audioPlayer) changeValume(factor int) {
 	ap.volumer.Volume += float64(factor) / 10
 	speaker.Unlock()
 }
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+

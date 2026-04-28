@@ -6,11 +6,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type lyrcsSyncer struct {
 	qiue    []lrc
 	current lrc
+	program *tea.Program // set after program is created
 }
 
 type lrc struct {
@@ -19,24 +22,44 @@ type lrc struct {
 }
 
 func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
+	if ls.program == nil {
+		return
+	}
+
 	go func() {
-		var i int
+		var (
+			i       int
+			current lrc
+		)
+		next := ls.qiue[i]
+		length := len(ls.qiue)
+		if length < 1 {
+			return
+		}
+
 		for {
-			nextLrc := ls.qiue[i]
-			for {
-				if ls.current.d > ap.positionD() {
-					i = 0
-					nextLrc = ls.qiue[i]
-				}
-				if nextLrc.d <= ap.positionD() {
-					ls.current = nextLrc
-					i++
-					if i < len(ls.qiue) {
-						break
-					}
-				}
-				time.Sleep(time.Millisecond)
+			pos := ap.positionD()
+			// Handle seek backwards
+			if current.d > pos {
+				i = 0
+				current = lrc{}
+				next = ls.qiue[i]
 			}
+
+			if next.d <= pos {
+				current = next
+				i++
+
+				if i < length {
+					next = ls.qiue[i]
+					ls.program.Send(lyricsMsg{current: current.line, next: next.line})
+				} else {
+					ls.program.Send(lyricsMsg{current: current.line, next: ""})
+				}
+				continue
+			}
+
+			time.Sleep(time.Millisecond)
 		}
 	}()
 }
@@ -55,25 +78,29 @@ func newLyrcsSyncer(path string) (*lyrcsSyncer, error) {
 }
 
 func formatLrcs(lines []string) ([]lrc, error) {
-	qiue := make([]lrc, len(lines))
-	for i, line := range lines {
+	qiue := make([]lrc, 0, len(lines))
+	for _, line := range lines {
+		if len(line) < 2 {
+			continue
+		}
 		sublines := strings.SplitN(line[1:], "] ", 2)
 		if len(sublines) < 2 {
-			return nil, fmt.Errorf("Coudn't parse lrc line format")
+			return nil, fmt.Errorf("couldn't parse lrc line format: %q", line)
 		}
-		times := strings.Split(sublines[0][1:], ":")
-
-		sec, err := strconv.ParseFloat(times[1], 32)
+		times := strings.Split(sublines[0], ":")
+		if len(times) < 2 {
+			return nil, fmt.Errorf("couldn't parse time format: %q", sublines[0])
+		}
+		sec, err := strconv.ParseFloat(times[1], 64)
 		if err != nil {
-			return nil, fmt.Errorf("Coudn't parse secend format")
+			return nil, fmt.Errorf("couldn't parse seconds: %w", err)
 		}
 		m, err := strconv.Atoi(times[0])
 		if err != nil {
-			return nil, fmt.Errorf("Coudn't parse minutes format")
+			return nil, fmt.Errorf("couldn't parse minutes: %w", err)
 		}
-
 		d := time.Duration(float64(m)*float64(time.Minute) + sec*float64(time.Second))
-		qiue[i] = lrc{d: d, line: sublines[1]}
+		qiue = append(qiue, lrc{d: d, line: sublines[1]})
 	}
 	return qiue, nil
 }

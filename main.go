@@ -3,8 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	tea "github.com/charmbracelet/bubbletea"
 	"os"
-	"time"
 )
 
 func main() {
@@ -15,6 +15,7 @@ func main() {
 	}
 	loops := flagParser.Int("loop", 1, "How many loops, -1 for infinitely.")
 	lrcsPath := flagParser.String("lrc", "", "Lrcs file path.")
+
 	if len(os.Args) < 2 {
 		flagParser.Usage()
 		os.Exit(2)
@@ -35,45 +36,23 @@ func main() {
 		os.Exit(2)
 	}
 
-	m := module{
-		ap: ap,
-		ls: ls,
+	p := tea.NewProgram(newModel(ap, ls))
+
+	// Give audio player and lyrics syncer a reference to the program
+	// so they can send messages into the Bubbletea loop.
+	ap.program = p
+	if ls != nil {
+		ls.program = p
 	}
 
-	keyCh := m.setupTerm()
-	defer m.resetTerm()
+	ap.play()
+	if ls != nil {
+		ls.sync(ap)
+	}
 
-	m.start()
-	// fmt.Print(ansi.CursorDown(5))
-	m.update()
-	round := time.Tick(100 * time.Microsecond)
-	for {
-		select {
-		case key := <-keyCh:
-			switch key {
-			case ' ':
-				m.ap.togglePause()
-			case 'q', 3: // 3 = Ctrl+C
-				return
-			case 'k':
-				m.ap.changeValume(1)
-			case 'j':
-				m.ap.changeValume(-1)
-			case 'h':
-				m.ap.seek(-10)
-			case 'l':
-				m.ap.seek(+10)
-			}
-		case <-round:
-			if m.ap.Paused {
-				continue
-			}
-
-			if m.ap.finished {
-				return
-			}
-
-			m.update()
-		}
+	if _, err := p.Run(); err != nil {
+		fmt.Println("error running program:", err)
+		os.Exit(1)
 	}
 }
+
