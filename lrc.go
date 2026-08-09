@@ -64,11 +64,20 @@ func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
 	}()
 }
 
-func newLyrcsSyncer(path string) (*lyrcsSyncer, error) {
-	if path == "" {
-		return nil, nil
+func newLyrcsSyncer(lrcPath, path string) (*lyrcsSyncer, error) {
+	if lrcPath == "" {
+		var ok bool
+		lrcPath, ok = strings.CutSuffix(path, ".mp3")
+		if !ok {
+			return nil, nil
+		}
+		lrcPath = lrcPath + ".lrc"
+		_, err := os.Stat(lrcPath)
+		if err != nil {
+			return nil, nil
+		}
 	}
-	f, err := os.ReadFile(path)
+	f, err := os.ReadFile(lrcPath)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +92,7 @@ func formatLrcs(lines []string) ([]lrc, error) {
 		if len(line) < 2 {
 			continue
 		}
-		sublines := strings.SplitN(line[1:], "] ", 2)
+		sublines := strings.SplitN(line[1:], "]", 2)
 		if len(sublines) < 2 {
 			return nil, fmt.Errorf("couldn't parse lrc line format: %q", line)
 		}

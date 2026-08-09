@@ -22,7 +22,7 @@ func main() {
 	}
 	flagParser.Parse(os.Args[2:])
 
-	ls, err := newLyrcsSyncer(*lrcsPath)
+	ls, err := newLyrcsSyncer(*lrcsPath, os.Args[1])
 	if err != nil {
 		fmt.Printf("lrc.NewLyrcsSyncer: %v\n\n", err)
 		flagParser.Usage()
@@ -55,4 +55,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-
