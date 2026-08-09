@@ -97,14 +97,19 @@ func (m model) View() string {
 	}
 
 	// Progress bar
-	pct := float64(m.ap.Position()) / float64(m.ap.Len())
+	pos := m.ap.Position()
+	length := m.ap.Length()
+	pct := 0.0
+	if length > 0 {
+		pct = pos.Seconds() / length.Seconds()
+	}
 	bar := m.bar.ViewAs(pct)
 
 	// Time / volume line
-	pos := styleTime.Render(formatTime(m.ap.D(m.ap.Position())))
-	end := styleTime.Render(formatTime(m.ap.D(m.ap.Len())))
-	volStr := fmt.Sprintf("Volume %02d", m.ap.volume())
-	timeStr := fmt.Sprintf("%s/%s", pos, end)
+	posStr := styleTime.Render(formatTime(pos))
+	endStr := styleTime.Render(formatTime(length))
+	volStr := fmt.Sprintf("Volume %02d%%", m.ap.volume())
+	timeStr := fmt.Sprintf("%s/%s", posStr, endStr)
 	gap := max(m.width-lipgloss.Width(volStr)-lipgloss.Width(timeStr), 0)
 	line2 := volStr + strings.Repeat(" ", gap) + timeStr
 

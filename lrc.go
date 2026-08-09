@@ -38,7 +38,7 @@ func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
 		}
 
 		for {
-			pos := ap.positionD()
+			pos := ap.Position()
 			// Handle seek backwards
 			if current.d > pos {
 				i = 0
@@ -49,7 +49,6 @@ func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
 			if next.d <= pos {
 				current = next
 				i++
-
 				if i < length {
 					next = ls.qiue[i]
 					ls.program.Send(lyricsMsg{current: current.line, next: next.line})
@@ -59,7 +58,7 @@ func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
 				continue
 			}
 
-			time.Sleep(time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 	}()
 }

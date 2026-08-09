@@ -10,7 +10,7 @@ import (
 func main() {
 	flagParser := flag.NewFlagSet("", flag.ExitOnError)
 	flagParser.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s <file.mp3> [OPTION]...\n\r OPTIONS:\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <audio-file> [OPTION]...\n\r OPTIONS:\n", os.Args[0])
 		flagParser.PrintDefaults()
 	}
 	loops := flagParser.Int("loop", 1, "How many loops, -1 for infinitely.")
@@ -35,6 +35,7 @@ func main() {
 		flagParser.Usage()
 		os.Exit(2)
 	}
+	defer ap.close()
 
 	p := tea.NewProgram(newModel(ap, ls))
 
