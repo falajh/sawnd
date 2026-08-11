@@ -138,6 +138,7 @@ func (ap *audioPlayer) pollPosition() {
 		pos, posErr := ap.conn.Get("time-pos")
 		length, lenErr := ap.conn.Get("duration")
 		paused, pauseErr := ap.conn.Get("pause")
+		volume, volErr := ap.conn.Get("volume")
 
 		ap.mu.Lock()
 		if posErr == nil {
@@ -155,6 +156,11 @@ func (ap *audioPlayer) pollPosition() {
 				ap.paused = v
 			}
 		}
+		if volErr == nil {
+			if v, ok := volume.(float64); ok {
+				ap.volumePct = int(v)
+			}
+		}
 		ap.mu.Unlock()
 	}
 }
@@ -166,6 +172,8 @@ func (ap *audioPlayer) Length() time.Duration {
 }
 
 func (ap *audioPlayer) volume() int {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
 	return ap.volumePct
 }
 
@@ -178,8 +186,12 @@ func (ap *audioPlayer) togglePause() {
 }
 
 func (ap *audioPlayer) changeValume(factor int) {
-	ap.volumePct = clamp(ap.volumePct+factor*5, 0, 100)
-	_ = ap.conn.Set("volume", ap.volumePct)
+	ap.mu.Lock()
+	newVol := clamp(ap.volumePct+factor*5, 0, 100)
+	ap.volumePct = newVol
+	ap.mu.Unlock()
+
+	_ = ap.conn.Set("volume", newVol)
 }
 
 func clamp(v, lo, hi int) int {
