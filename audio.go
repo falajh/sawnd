@@ -16,13 +16,15 @@ type audioPlayer struct {
 	conn       *mpvipc.Connection
 	cmd        *exec.Cmd
 	socketPath string
-	program    *tea.Program // set after program is created
+	program    *tea.Program
 
 	mu        sync.Mutex
 	position  time.Duration
 	length    time.Duration
 	paused    bool
 	volumePct int
+
+	status *StatusBroadcaster
 }
 
 func newAudioPlayer(filePath string, loop int) (*audioPlayer, error) {
@@ -33,9 +35,10 @@ func newAudioPlayer(filePath string, loop int) (*audioPlayer, error) {
 	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("sawnd-%d.sock", os.Getpid()))
 
 	args := []string{
+		"--no-load-scripts",
 		"--no-video",
 		"--idle=yes",
-		"--pause=yes", // start paused; play() unpauses once the TUI is wired up
+		"--pause=yes",
 		"--input-ipc-server=" + socketPath,
 	}
 	switch {
@@ -47,13 +50,13 @@ func newAudioPlayer(filePath string, loop int) (*audioPlayer, error) {
 	args = append(args, filePath)
 
 	cmd := exec.Command("mpv", args...)
+	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start mpv: %w", err)
 	}
 
 	conn := mpvipc.NewConnection(socketPath)
 
-	// mpv creates the IPC socket asynchronously, so retry briefly.
 	var connErr error
 	for range 100 {
 		if connErr = conn.Open(); connErr == nil {
@@ -79,7 +82,14 @@ func newAudioPlayer(filePath string, loop int) (*audioPlayer, error) {
 		socketPath: socketPath,
 		paused:     true,
 		volumePct:  volumePct,
+		status:     NewStatusBroadcaster(),
 	}, nil
+}
+
+// Subscribe lets any module receive a live stream of playback status
+// updates without audioPlayer needing to know who's listening.
+func (ap *audioPlayer) Subscribe() <-chan PlayerStatus {
+	return ap.status.Subscribe()
 }
 
 func (ap *audioPlayer) play() {
@@ -94,6 +104,16 @@ func (ap *audioPlayer) play() {
 	go func() {
 		for event := range events {
 			if event.Name == "end-file" {
+				ap.mu.Lock()
+				s := PlayerStatus{
+					State:     StateStopped,
+					Position:  ap.position,
+					Length:    ap.length,
+					VolumePct: ap.volumePct,
+				}
+				ap.mu.Unlock()
+				ap.status.publish(s)
+
 				if ap.program != nil {
 					ap.program.Send(finishedMsg{})
 				}
@@ -104,28 +124,10 @@ func (ap *audioPlayer) play() {
 	}()
 }
 
-// close stops mpv and cleans up the IPC socket. Call this after the
-// Bubble Tea program exits.
-func (ap *audioPlayer) close() {
-	if ap.conn != nil && !ap.conn.IsClosed() {
-		_, _ = ap.conn.Call("quit")
-		_ = ap.conn.Close()
-	}
-	if ap.cmd != nil && ap.cmd.Process != nil {
-		_ = ap.cmd.Process.Kill()
-		_ = ap.cmd.Wait()
-	}
-	_ = os.Remove(ap.socketPath)
-}
-
-func (ap *audioPlayer) Position() time.Duration {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-	return ap.position
-}
-
-// pollPosition is the ONLY goroutine that talks to mpv for time-pos/duration.
-// Everything else reads the cached values via Position()/Length().
+// pollPosition is the single source of truth for mpv's live state — the
+// only goroutine that talks to mpv for time-pos/duration/pause/volume. It
+// caches the values (for the TUI's synchronous getters) and publishes them
+// to status (for MPRIS, lyrics sync, or anything else) on every tick.
 func (ap *audioPlayer) pollPosition() {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -161,8 +163,42 @@ func (ap *audioPlayer) pollPosition() {
 				ap.volumePct = int(v)
 			}
 		}
+
+		state := StatePlaying
+		if ap.paused {
+			state = StatePaused
+		}
+		s := PlayerStatus{
+			State:     state,
+			Position:  ap.position,
+			Length:    ap.length,
+			VolumePct: ap.volumePct,
+		}
 		ap.mu.Unlock()
+
+		ap.status.publish(s)
 	}
+}
+
+func (ap *audioPlayer) close() {
+	if ap.status != nil {
+		ap.status.closeAll()
+	}
+	if ap.conn != nil && !ap.conn.IsClosed() {
+		_, _ = ap.conn.Call("quit")
+		_ = ap.conn.Close()
+	}
+	if ap.cmd != nil && ap.cmd.Process != nil {
+		_ = ap.cmd.Process.Kill()
+		_ = ap.cmd.Wait()
+	}
+	_ = os.Remove(ap.socketPath)
+}
+
+func (ap *audioPlayer) Position() time.Duration {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+	return ap.position
 }
 
 func (ap *audioPlayer) Length() time.Duration {
