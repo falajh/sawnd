@@ -21,11 +21,10 @@ type lrc struct {
 	line string
 }
 
-func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
+func (ls *lyrcsSyncer) sync(updates <-chan PlayerStatus) {
 	if ls.program == nil {
 		return
 	}
-
 	go func() {
 		var (
 			i       int
@@ -37,8 +36,9 @@ func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
 			return
 		}
 
-		for {
-			pos := ap.Position()
+		for status := range updates {
+			pos := status.Position
+
 			// Handle seek backwards
 			if current.d > pos {
 				i = 0
@@ -46,19 +46,18 @@ func (ls *lyrcsSyncer) sync(ap *audioPlayer) {
 				next = ls.qiue[i]
 			}
 
-			if next.d <= pos {
+			// Catch up through any lines whose time has passed since the
+			// last update (handles forward seeks / coarse tick spacing).
+			for next.d <= pos {
 				current = next
 				i++
-				if i < length {
-					next = ls.qiue[i]
-					ls.program.Send(lyricsMsg{current: current.line, next: next.line})
-				} else {
+				if i >= length {
 					ls.program.Send(lyricsMsg{current: current.line, next: ""})
+					break
 				}
-				continue
+				next = ls.qiue[i]
+				ls.program.Send(lyricsMsg{current: current.line, next: next.line})
 			}
-
-			time.Sleep(50 * time.Millisecond)
 		}
 	}()
 }

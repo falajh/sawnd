@@ -37,6 +37,14 @@ func main() {
 	}
 	defer ap.close()
 
+	mprisSvc, err := startMPRIS(ap, os.Args[1])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mpris: %v\n", err)
+	} else {
+		defer mprisSvc.Close()
+		go mprisSvc.run(ap.Subscribe())
+	}
+
 	p := tea.NewProgram(newModel(ap, ls))
 
 	// Give audio player and lyrics syncer a reference to the program
@@ -44,12 +52,10 @@ func main() {
 	ap.program = p
 	if ls != nil {
 		ls.program = p
+		ls.sync(ap.status.Subscribe())
 	}
 
 	ap.play()
-	if ls != nil {
-		ls.sync(ap)
-	}
 
 	if _, err := p.Run(); err != nil {
 		fmt.Println("error running program:", err)
